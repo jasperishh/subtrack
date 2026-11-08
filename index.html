@@ -378,7 +378,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
             <button class="btn-ghost sm" id="syncNow">Sync now</button>
             <button class="btn-text" id="syncDisconnect">Disconnect this device</button>
           </div>
-          <p class="status" id="syncStatus">Connect once on each device you use. Your list then loads from the Sheet every time you open the page.</p>
+          <p class="status" id="syncStatus">Connected to your Subtrack sheet. Your list loads from it every time you open the page.</p>
         </div>
         <div class="setting">
           <label for="currency">Currency</label>
@@ -653,17 +653,19 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   // ---------- Google Sheet sync ----------
   var SYNC_KEY = "subtrack.sync";
   var SYNC_COLS = ["id", "name", "amount", "cycle", "category", "next", "trial", "trialEnd", "note", "created"];
+  var BUILT_IN_SYNC = { url: "https://script.google.com/macros/s/AKfycbxAg0qIBMUTpB3wVqyk4hTNQTjlPxm6WeVXpUTIPLR3ms6T6BwSZq4H2-sYlkLLT4p4/exec", key: "yjkI2gEs6ZNI1nmoq-iL_W_GM_36OVNd" };
   var sync = { url: "", key: "", ok: false, dirty: false, timer: null };
   function loadSync() {
-    try {
-      var r = localStorage.getItem(SYNC_KEY);
-      if (r) { var o = JSON.parse(r); sync.url = o.url || ""; sync.key = o.key || ""; sync.dirty = !!o.dirty; }
-    } catch (e) { /* storage blocked */ }
+    var stored = null;
+    try { var r = localStorage.getItem(SYNC_KEY); if (r) stored = JSON.parse(r); } catch (e) { /* storage blocked */ }
+    if (stored && stored.off) return;
+    if (stored && stored.url) { sync.url = stored.url; sync.key = stored.key || ""; sync.dirty = !!stored.dirty; return; }
+    sync.url = BUILT_IN_SYNC.url; sync.key = BUILT_IN_SYNC.key;
   }
   function storeSync() {
     try {
       if (sync.url) localStorage.setItem(SYNC_KEY, JSON.stringify({ url: sync.url, key: sync.key, dirty: sync.dirty }));
-      else localStorage.removeItem(SYNC_KEY);
+      else localStorage.setItem(SYNC_KEY, JSON.stringify({ off: true }));
     } catch (e) { /* storage blocked */ }
   }
   function parseSyncCode(code) {
