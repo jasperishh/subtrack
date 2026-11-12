@@ -7,6 +7,9 @@
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Subtrack</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#ebf5ff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600&display=swap">
 <style>
 /* Layout: one centered column on the sky canvas; the yearly total is the hero, cards step up to bone-white. */
@@ -268,7 +271,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
       <a href="#subscriptions">Subscriptions</a>
       <a href="#calendar">Calendar</a>
     </nav>
-    <div class="header-cta"><button class="gs-button gs-button--sm" data-action="add"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="label-long">Add subscription</span><span class="sr" hidden>Add</span></button></div>
+    <div class="header-cta"><button class="gs-button gs-button--sm" data-action="add" aria-label="Add subscription"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="label-long">Add subscription</span><span class="sr" hidden>Add</span></button></div>
   </header>
 
   <section class="hero" id="overview">
@@ -575,19 +578,19 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   function parseISO(s) { var p = String(s).split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
   function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
-  function occ(anchor, cycle, k) {
+  function occ(anchor, cycle, k, day) {
     if (cycle === "weekly") return addDays(anchor, 7 * k);
     var m = anchor.getMonth() + CYCLES[cycle].months * k;
     var y = anchor.getFullYear() + Math.floor(m / 12);
     var mm = ((m % 12) + 12) % 12;
-    return new Date(y, mm, Math.min(anchor.getDate(), daysInMonth(y, mm)));
+    return new Date(y, mm, Math.min(day || anchor.getDate(), daysInMonth(y, mm)));
   }
-  function nextFrom(anchorStr, cycle, from) {
+  function nextFrom(anchorStr, cycle, from, day) {
     var a = parseISO(anchorStr);
     if (a >= from) return a;
     var k = Math.max(0, Math.floor((from - a) / (CYCLES[cycle].days * DAY)) - 1);
-    var d = occ(a, cycle, k);
-    while (d < from) { k++; d = occ(a, cycle, k); }
+    var d = occ(a, cycle, k, day);
+    while (d < from) { k++; d = occ(a, cycle, k, day); }
     return d;
   }
   function diffDays(d) { return Math.round((d - today()) / DAY); }
@@ -597,7 +600,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   function whenWords(n) { return n === 0 ? "today" : n === 1 ? "tomorrow" : "in " + n + " days"; }
 
   // ---------- state ----------
-  var state = { subs: [], settings: { currency: "THB", lead: 7 }, examples: false };
+  var state = { subs: [], settings: { currency: "THB", lead: 7 }, examples: false, deleted: [] };
   var storageOK = true;
 
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -632,6 +635,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
           state.subs = data.subs;
           state.settings = Object.assign({ currency: "THB", lead: 7 }, data.settings || {});
           state.examples = !!data.examples;
+          state.deleted = Array.isArray(data.deleted) ? data.deleted : [];
         }
       } catch (e) { /* fall through to examples */ }
     }
@@ -646,13 +650,16 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   function save() {
     saveLocal();
     if (!sync.url || state.examples) return;
+    // Dirty until the Sheet confirms, so a change made just before the tab closes is not lost to the next pull.
+    sync.dirty = true; storeSync();
     if (sync.ok) schedulePush();
-    else { sync.dirty = true; storeSync(); syncStatus("Saved on this device. It goes to your Sheet on the next sync."); }
+    else syncStatus("Saved on this device. It goes to your Sheet on the next sync.");
   }
+  function forget(ids) { ids.forEach(function (id) { if (state.deleted.indexOf(id) < 0) state.deleted.push(id); }); }
 
   // ---------- Google Sheet sync ----------
   var SYNC_KEY = "subtrack.sync";
-  var SYNC_COLS = ["id", "name", "amount", "cycle", "category", "next", "trial", "trialEnd", "note", "created"];
+  var SYNC_COLS = ["id", "name", "amount", "cycle", "category", "next", "trial", "trialEnd", "note", "created", "day"];
   var BUILT_IN_SYNC = { url: "https://script.google.com/macros/s/AKfycbxAg0qIBMUTpB3wVqyk4hTNQTjlPxm6WeVXpUTIPLR3ms6T6BwSZq4H2-sYlkLLT4p4/exec", key: "yjkI2gEs6ZNI1nmoq-iL_W_GM_36OVNd" };
   var sync = { url: "", key: "", ok: false, dirty: false, timer: null };
   function loadSync() {
@@ -676,9 +683,12 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url) || key.length < 10) return null;
     return { url: url, key: key };
   }
-  function callSheet(payload) {
+  function callSheet(payload, opts) {
     payload.key = sync.key;
-    return fetch(sync.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow" })
+    var ac = typeof AbortController === "function" ? new AbortController() : null;
+    var tm = ac && setTimeout(function () { ac.abort(); }, 40000);
+    return fetch(sync.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow", signal: ac ? ac.signal : undefined, keepalive: !!(opts && opts.keepalive) })
+      .finally(function () { clearTimeout(tm); })
       .then(function (r) { if (!r.ok) throw new Error("the Sheet answered " + r.status); return r.json(); })
       .then(function (d) { if (!d || !d.ok) throw new Error((d && d.error) || "no answer from the Sheet"); return d; });
   }
@@ -692,7 +702,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     $("syncOnRow").hidden = !on;
     $("wipeHint").textContent = on ? "Also clears your Sheet." : "";
   }
-  function toRemote(s) { var o = {}; SYNC_COLS.forEach(function (c) { o[c] = s[c] === undefined ? "" : s[c]; }); o.trial = !!s.trial; return o; }
+  function toRemote(s) { var o = {}; SYNC_COLS.forEach(function (c) { o[c] = s[c] === undefined ? "" : s[c]; }); o.trial = !!s.trial; o.day = +s.day || ""; return o; }
   function fromRemote(r) {
     var name = String(r.name || "").trim();
     var cyc = String(r.cycle || "").toLowerCase();
@@ -703,15 +713,16 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
       id: String(r.id || "").trim() || uid(), name: name, amount: parseAmount(r.amount), cycle: cycle,
       category: CATS[r.category] ? r.category : (String(r.category || "").trim() ? matchCat(r.category) : guessCat(name)),
       next: nd ? iso(nd) : iso(addDays(today(), 30)), trial: trial && !!td, trialEnd: trial && td ? iso(td) : "",
-      note: String(r.note || ""), created: cd ? iso(cd) : iso(today())
+      note: String(r.note || ""), created: cd ? iso(cd) : iso(today()),
+      day: (+r.day >= 1 && +r.day <= 31) ? +r.day : 0
     };
   }
-  function pushNow() {
-    clearTimeout(sync.timer);
+  function pushNow(opts) {
+    clearTimeout(sync.timer); sync.timer = null;
     if (!sync.url || state.examples) return Promise.resolve();
     syncStatus("Saving to your Sheet...");
-    return callSheet({ action: "save", subs: state.subs.map(toRemote) }).then(function (d) {
-      sync.dirty = false; storeSync();
+    return callSheet({ action: "save", subs: state.subs.map(toRemote) }, opts).then(function (d) {
+      sync.dirty = false; storeSync(); state.deleted = []; saveLocal();
       syncStatus("Saved " + d.count + " to your Sheet at " + clock() + ".");
     }).catch(function (e) {
       sync.dirty = true; storeSync();
@@ -719,18 +730,23 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     });
   }
   function schedulePush() { clearTimeout(sync.timer); sync.timer = setTimeout(pushNow, 700); }
+  // A push still waiting when the tab goes away is sent at once, in the background.
+  function flushPush() { if (sync.timer && sync.ok && !state.examples) pushNow({ keepalive: true }); }
+  addEventListener("pagehide", flushPush);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flushPush(); });
   function pull() {
     if (!sync.url) return Promise.resolve();
     syncStatus("Syncing with your Sheet...");
     return callSheet({ action: "load" }).then(function (d) {
       var remote = (d.subs || []).map(fromRemote).filter(function (s) { return s.name && s.amount > 0; });
       var local = state.examples ? [] : state.subs;
-      var before = JSON.stringify(remote);
+      var before = JSON.stringify(remote.map(toRemote));
       sync.ok = true;
-      if (sync.dirty && local.length) {
-        // keep changes made on this device while it was offline
-        var byId = {};
-        remote.forEach(function (s) { byId[s.id] = s; });
+      if (sync.dirty && !state.examples) {
+        // keep changes made on this device while it was offline, including deletions
+        var byId = {}; var gone = {};
+        state.deleted.forEach(function (id) { gone[id] = true; });
+        remote.forEach(function (s) { if (!gone[s.id]) byId[s.id] = s; });
         local.forEach(function (s) { byId[s.id] = s; });
         state.subs = Object.keys(byId).map(function (k) { return byId[k]; });
         state.examples = false; roll(); saveLocal(); renderAll();
@@ -738,7 +754,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
       }
       if (remote.length) {
         state.subs = remote; state.examples = false; roll(); saveLocal(); renderAll();
-        if (JSON.stringify(state.subs) !== before) return pushNow();
+        if (JSON.stringify(state.subs.map(toRemote)) !== before) return pushNow();
         syncStatus("Loaded " + remote.length + " from your Sheet at " + clock() + ".");
         return;
       }
@@ -756,13 +772,16 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   function roll() {
     var t = today();
     state.subs.forEach(function (s) {
+      if (!s.id) s.id = uid();
+      s.name = String(s.name == null ? "" : s.name); s.amount = +s.amount || 0;
       if (!CYCLES[s.cycle]) s.cycle = "monthly";
       if (!CATS[s.category]) s.category = "Other";
       if (s.trial && s.trialEnd) {
-        if (parseISO(s.trialEnd) < t) { s.trial = false; s.next = iso(nextFrom(s.trialEnd, s.cycle, t)); }
+        if (parseISO(s.trialEnd) < t) { s.trial = false; s.day = parseISO(s.trialEnd).getDate(); s.next = iso(nextFrom(s.trialEnd, s.cycle, t, s.day)); }
         else s.next = s.trialEnd;
       } else if (s.next) {
-        s.next = iso(nextFrom(s.next, s.cycle, t));
+        if (!s.day) s.day = parseISO(s.next).getDate();
+        s.next = iso(nextFrom(s.next, s.cycle, t, s.day));
       } else s.next = iso(t);
       if (!s.created) s.created = iso(t);
     });
@@ -889,7 +908,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
       var span = Math.ceil(31 / cy.days) + 3;
       for (var k = approx - 2; k <= approx + span; k++) {
         if (s.trial && k < 0) continue;
-        var d = occ(anchor, s.cycle, k);
+        var d = occ(anchor, s.cycle, k, s.day);
         if (d < first || d > last) continue;
         if (k < 0 && d < created) continue;
         (byDay[d.getDate()] = byDay[d.getDate()] || []).push(s);
@@ -968,9 +987,12 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   function openDlg(d) { if (typeof d.showModal === "function") d.showModal(); else d.setAttribute("open", ""); }
   function closeDlg(d) { if (typeof d.close === "function") d.close(); else d.removeAttribute("open"); }
   document.querySelectorAll("dialog").forEach(function (d) {
+    var downOnBackdrop = false;
+    d.addEventListener("pointerdown", function (e) { downOnBackdrop = e.target === d; });
     d.addEventListener("click", function (e) {
       if (e.target.closest("[data-close]")) closeDlg(d);
-      else if (e.target === d) closeDlg(d);
+      else if (e.target === d && downOnBackdrop) closeDlg(d);
+      downOnBackdrop = false;
     });
   });
 
@@ -1001,7 +1023,12 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     var v = this.value.trim().toLowerCase(); if (!v) return;
     var hit = CATALOG.filter(function (c) { return c[0].toLowerCase() === v; })[0];
     if (hit) {
-      if (!$("fAmount").value) $("fAmount").value = state.settings.currency === "USD" ? hit[3] : hit[2];
+      var amt = $("fAmount");
+      if (!amt.value) {
+        amt.value = state.settings.currency === "USD" ? hit[3] : hit[2];
+        // The suggested price stays selected, so typing your own price replaces it instead of appending.
+        setTimeout(function () { if (document.activeElement === amt) amt.select(); }, 0);
+      }
       $("fCycle").value = hit[4]; $("fCat").value = hit[1];
     } else $("fCat").value = guessCat(v);
   });
@@ -1012,6 +1039,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     var err = !name ? "Give it a name." : !(amount > 0) ? "Enter the amount you're charged, like 419." : !$("fNext").value && !$("fTrial").checked ? "Pick the date of the next charge." : ($("fTrial").checked && !$("fTrialEnd").value) ? "Pick the day the trial ends." : "";
     if (err) { $("editErr").textContent = err; $("editErr").hidden = false; return; }
     var data = { name: name, amount: amount, cycle: $("fCycle").value, category: $("fCat").value, next: $("fNext").value, trial: $("fTrial").checked, trialEnd: $("fTrial").checked ? $("fTrialEnd").value : "", note: $("fNote").value.trim() };
+    data.day = parseISO(data.trial ? data.trialEnd : data.next).getDate();
     if (editingId) {
       var s = state.subs.filter(function (x) { return x.id === editingId; })[0];
       Object.assign(s, data);
@@ -1031,7 +1059,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     if (!this.dataset.armed) { this.dataset.armed = "1"; this.textContent = "Tap again to delete"; return; }
     var s = state.subs.filter(function (x) { return x.id === editingId; })[0];
     state.subs = state.subs.filter(function (x) { return x.id !== editingId; });
-    save(); renderAll(); closeDlg($("editDlg")); toast("Deleted " + (s ? s.name : "subscription"));
+    forget([editingId]); save(); renderAll(); closeDlg($("editDlg")); toast("Deleted " + (s ? s.name : "subscription"));
   });
 
   // Guided setup
@@ -1388,7 +1416,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     if (e.target.id === "wipe") {
       $("wipeBox").innerHTML = '<button class="btn-text" id="wipeNo">Keep my data</button><button class="gs-button gs-button--sm" id="wipeYes">Delete everything</button>';
     } else if (e.target.id === "wipeYes") {
-      state.subs = []; state.examples = false; save(); renderAll();
+      forget(state.subs.map(function (x) { return x.id; })); state.subs = []; state.examples = false; save(); renderAll();
       $("wipeBox").innerHTML = '<button class="btn-ghost sm" id="wipe">Delete all data</button>';
       toast("All data deleted from this browser");
     } else if (e.target.id === "wipeNo") {
@@ -1440,7 +1468,14 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
   loadSync();
   renderAll();
   renderSync();
-  if (sync.url) pull();
+  if (sync.url) pull(); else syncStatus("Sync is off. Your list stays in this browser.");
+  addEventListener("online", function () { if (sync.url && (!sync.ok || sync.dirty)) pull(); });
+  var lastDay = iso(today());
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible") return;
+    if (iso(today()) !== lastDay) { lastDay = iso(today()); roll(); saveLocal(); renderAll(); }
+    if (sync.url && sync.dirty) pull();
+  });
 
   // expose pure helpers for a quick self-test
   window.__subtrack = { parseDate: parseDate, fromBank: fromBank, fromLines: fromLines, fromSubCSV: fromSubCSV, sampleStatement: sampleStatement, nextFrom: nextFrom, iso: iso };
