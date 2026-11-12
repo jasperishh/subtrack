@@ -902,7 +902,6 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
     var total = 0, count = 0;
     state.subs.forEach(function (s) {
       var anchor = parseISO(s.next);
-      var created = parseISO(s.created || s.next);
       var cy = CYCLES[s.cycle];
       var approx = Math.floor((first - anchor) / (cy.days * DAY));
       var span = Math.ceil(31 / cy.days) + 3;
@@ -910,7 +909,6 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
         if (s.trial && k < 0) continue;
         var d = occ(anchor, s.cycle, k, s.day);
         if (d < first || d > last) continue;
-        if (k < 0 && d < created) continue;
         (byDay[d.getDate()] = byDay[d.getDate()] || []).push(s);
         total += s.amount; count++;
       }
@@ -923,7 +921,7 @@ textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMon
       var items = byDay[dd] || [];
       var chips = items.slice(0, 3).map(function (s) {
         return '<div class="chip" style="background:' + (s.trial ? "var(--solar-wash)" : CATS[s.category]) + '" title="' + esc(s.name + " " + money(s.amount)) + '">' + esc(s.name) + "</div>";
-      }).join("") + (items.length > 3 ? '<div class="chip" style="background:var(--mist-gray)">+' + (items.length - 3) + " more</div>" : "");
+      }).join("") + (items.length > 3 ? '<div class="chip" style="background:var(--mist-gray)" title="' + esc(items.slice(3).map(function (s) { return s.name + " " + money(s.amount); }).join(", ")) + '">+' + (items.length - 3) + " more</div>" : "");
       html += '<div class="day' + (isToday ? " today" : "") + '"><span class="d num">' + dd + "</span>" + chips + "</div>";
     }
     var tail = (7 - ((lead + last.getDate()) % 7)) % 7;
